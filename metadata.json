@@ -1,0 +1,6 @@
+{
+  "name": "Vintage Debate Platform",
+  "description": "An interactive vintage-styled debate platform with live audio/video-grid simulations, live chat, audience reactions, customizeable admin controls, automated transcriptions, and an AI Judge with scoring metrics.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

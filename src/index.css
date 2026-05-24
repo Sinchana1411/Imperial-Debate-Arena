@@ -1,0 +1,104 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=IM+Fell+English:ital@0;1&family=JetBrains+Mono:wght@400;600&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-serif: "IM Fell English", "Playfair Display", Georgia, serif;
+  --font-display: "Cinzel", "Playfair Display", serif;
+  --font-mono: "JetBrains Mono", Courier, monospace;
+}
+
+/* Custom Vintage Styling Classes */
+.parchment {
+  background-color: #f4edd8;
+  background-image: radial-gradient(circle, rgba(255,255,255,0.4) 0%, rgba(200,180,140,0.15) 100%);
+  color: #2b2319;
+  border-color: #3d2f24;
+}
+
+.parchment-dark {
+  background-color: #ebdcb2;
+  background-image: radial-gradient(circle, rgba(255,255,255,0.2) 0%, rgba(180,160,110,0.25) 100%);
+  color: #1e1710;
+  border-color: #2e2015;
+}
+
+.border-vintage {
+  border: 4px double #3d2f24;
+}
+
+.border-vintage-thin {
+  border: 1px solid #5a4533;
+}
+
+.border-gold {
+  border: 2px solid #b89758;
+}
+
+.shadow-vintage {
+  box-shadow: 4px 4px 0px #3d2f24;
+}
+
+.shadow-vintage-lg {
+  box-shadow: 8px 8px 12px rgba(61, 47, 36, 0.35);
+}
+
+.vintage-button {
+  background: #3d2f24;
+  color: #ebdcb2;
+  font-family: var(--font-display);
+  border: 1.5px solid #ebdcb2;
+  transition: all 0.20s ease-in-out;
+  box-shadow: 2px 2px 0px #1e1710;
+}
+
+.vintage-button:hover {
+  background: #ebdcb2;
+  color: #3d2f24;
+  border: 1.5px solid #3d2f24;
+  box-shadow: 2px 2px 0px #3d2f24;
+}
+
+.vintage-button:active {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0px #3d2f24;
+}
+
+.vintage-link {
+  font-family: var(--font-serif);
+  color: #6d4c41;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.vintage-link:hover {
+  color: #3e2723;
+}
+
+/* Scrollbar Vintage Styles */
+::-webkit-scrollbar {
+  width: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #f4edd8;
+  border-left: 1px solid #3d2f24;
+}
+::-webkit-scrollbar-thumb {
+  background: #8d6e63;
+  border: 2px solid #f4edd8;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #5d4037;
+}
+
+/* Animations */
+@keyframes speakPulse {
+  0% { box-shadow: 0 0 0 0 rgba(141, 110, 99, 0.7); }
+  70% { box-shadow: 0 0 0 8px rgba(141, 110, 99, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(141, 110, 99, 0); }
+}
+
+.speaking-animation {
+  animation: speakPulse 1.8s infinite;
+  border-color: #8d6e63 !important;
+}
