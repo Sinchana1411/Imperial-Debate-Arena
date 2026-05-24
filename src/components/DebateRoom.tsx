@@ -10,6 +10,7 @@ import {
 interface DebateRoomProps {
   room: DebateRoom;
   currentUser?: {
+    id?: string;
     name: string;
     role: 'favour' | 'against' | 'moderator' | 'audience';
     avatar: string;
@@ -19,6 +20,8 @@ interface DebateRoomProps {
 }
 
 export default function DebateRoomChamber({ room, currentUser, onBack, onUpdateRoom }: DebateRoomProps) {
+  const uId = currentUser?.id || 'user-speaker-id';
+
   // Debate control states
   const [isSimulating, setIsSimulating] = useState(false);
   const [currentSpeakerId, setCurrentSpeakerId] = useState<string | null>(null);
@@ -34,10 +37,10 @@ export default function DebateRoomChamber({ room, currentUser, onBack, onUpdateR
   useEffect(() => {
     if (!currentUser) return;
     
-    const userExists = room.participants.some(p => p.id === 'user-speaker-id');
+    const userExists = room.participants.some(p => p.id === uId);
     if (!userExists) {
       // Calculate current count of active speakers in this chamber (excluding user)
-      const activeOratorsCount = room.participants.filter(p => p.role !== 'audience' && p.id !== 'user-speaker-id').length;
+      const activeOratorsCount = room.participants.filter(p => p.role !== 'audience' && p.id !== uId).length;
       let assignedRole: 'favour' | 'against' | 'moderator' | 'audience';
       
       if (activeOratorsCount < 10) {
@@ -56,7 +59,7 @@ export default function DebateRoomChamber({ room, currentUser, onBack, onUpdateR
       }
 
       const userParticipant: Participant = {
-        id: 'user-speaker-id',
+        id: uId,
         name: currentUser.name,
         role: assignedRole,
         avatar: currentUser.avatar,
@@ -91,7 +94,7 @@ export default function DebateRoomChamber({ room, currentUser, onBack, onUpdateR
       setUserSpeakerName(currentUser.name);
       setUserSpeakerAvatar(currentUser.avatar);
     } else {
-      const registeredUser = room.participants.find(p => p.id === 'user-speaker-id');
+      const registeredUser = room.participants.find(p => p.id === uId);
       if (registeredUser) {
         setUserRole(registeredUser.role);
         setUserSpeakerName(registeredUser.name);
@@ -155,14 +158,14 @@ export default function DebateRoomChamber({ room, currentUser, onBack, onUpdateR
 
   // Updaters for changing active user affiliation
   const handleUpdateUserStatus = (roleChoice: 'favour' | 'against' | 'moderator' | 'audience') => {
-    const existingRef = room.participants.find(p => p.id === 'user-speaker-id');
+    const existingRef = room.participants.find(p => p.id === uId);
     const wasAudience = existingRef ? existingRef.role === 'audience' : true;
     const isRequestingActive = roleChoice !== 'audience';
 
     let finalRole = roleChoice;
 
     if (wasAudience && isRequestingActive) {
-      const activeOratorsCount = room.participants.filter(p => p.id !== 'user-speaker-id' && p.role !== 'audience').length;
+      const activeOratorsCount = room.participants.filter(p => p.id !== uId && p.role !== 'audience').length;
       if (activeOratorsCount >= 10) {
         alert("Chamber Active capacity reached! There are already 10 active debating delegates seated. You can only join as a spectating Gallery Audience.");
         finalRole = 'audience';
@@ -170,7 +173,7 @@ export default function DebateRoomChamber({ room, currentUser, onBack, onUpdateR
     }
 
     const updatedParticipants = room.participants.map(p => {
-      if (p.id === 'user-speaker-id') {
+      if (p.id === uId) {
         return {
           ...p,
           role: finalRole,
@@ -194,7 +197,7 @@ export default function DebateRoomChamber({ room, currentUser, onBack, onUpdateR
     if (!newName.trim()) return;
     
     const updatedParticipants = room.participants.map(p => {
-      if (p.id === 'user-speaker-id') {
+      if (p.id === uId) {
         return { ...p, name: newName, avatar: newAvatar };
       }
       return p;
@@ -765,10 +768,10 @@ export default function DebateRoomChamber({ room, currentUser, onBack, onUpdateR
     const textToDeliver = polishedUserSpeech || userDraftNotes;
     if (!textToDeliver.trim() || userRole === 'audience' || userRole === 'moderator') return;
 
-    setCurrentSpeakerId('user-speaker-id');
+    setCurrentSpeakerId(uId);
     
     // Invoke Judge & add
-    judgeSpeechAndAppend('user-speaker-id', userSpeakerName, userRole, textToDeliver);
+    judgeSpeechAndAppend(uId, userSpeakerName, userRole, textToDeliver);
 
     // Clear draft values
     setUserDraftNotes('');
@@ -807,7 +810,7 @@ export default function DebateRoomChamber({ room, currentUser, onBack, onUpdateR
   const againstMembers = room.participants.filter(p => p.role === 'against');
 
   // Filter lists for Zoom Grid and Capacity calculations
-  const otherActiveParticipants = room.participants.filter(p => p.id !== 'user-speaker-id' && p.role !== 'audience');
+  const otherActiveParticipants = room.participants.filter(p => p.id !== uId && p.role !== 'audience');
   const activeParticipantsCount = room.participants.filter(p => p.role !== 'audience').length;
   const audienceMembersCount = room.participants.filter(p => p.role === 'audience').length;
 
@@ -879,7 +882,7 @@ export default function DebateRoomChamber({ room, currentUser, onBack, onUpdateR
               {/* FEED 1: THE USER PREVIEW CELL (Always Displayed in Prominence) */}
               <div 
                 className={`aspect-square w-full bg-stone-900 border-2 rounded-sm relative overflow-hidden transition-all duration-300 flex flex-col justify-between ${
-                  currentSpeakerId === 'user-speaker-id' 
+                  currentSpeakerId === uId 
                     ? 'border-amber-500 shadow-lg shadow-amber-500/20 scale-[1.02] z-10' 
                     : 'border-amber-950/60 hover:border-amber-900/40'
                 }`}
@@ -951,7 +954,7 @@ export default function DebateRoomChamber({ room, currentUser, onBack, onUpdateR
                 </div>
 
                 {/* Interactive Orator Speach Status banner */}
-                {currentSpeakerId === 'user-speaker-id' && (
+                {currentSpeakerId === uId && (
                   <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-amber-900/90 border border-amber-500 text-amber-100 text-[10px] px-2 py-0.5 uppercase tracking-wider font-bold animate-pulse text-center z-20">
                     🎙️ TRANSMITTING SPEECH
                   </div>
@@ -1423,7 +1426,7 @@ export default function DebateRoomChamber({ room, currentUser, onBack, onUpdateR
                       <div key={p.id} className="flex justify-between items-center border-b border-amber-950/5 pb-1.5 last:border-0 last:pb-0">
                         <div className="flex items-center gap-1.5 truncate">
                           <span className="text-xs">{p.avatar}</span>
-                          <span className="font-medium truncate">{p.name} {p.id === 'user-speaker-id' && <strong className="text-amber-900 font-extrabold">(YOU)</strong>}</span>
+                          <span className="font-medium truncate">{p.name} {p.id === uId && <strong className="text-amber-900 font-extrabold">(YOU)</strong>}</span>
                         </div>
                         <div className="flex items-center gap-1.5">
                           <span className={`px-2 py-0.5 rounded-sm text-[8px] font-extrabold font-mono uppercase tracking-wider ${
@@ -1437,7 +1440,7 @@ export default function DebateRoomChamber({ room, currentUser, onBack, onUpdateR
                           }`}>
                             {p.role}
                           </span>
-                          {p.id !== 'user-speaker-id' && (
+                          {p.id !== uId && (
                             <button
                               onClick={() => {
                                 const cleared = room.participants.filter(pt => pt.id !== p.id);

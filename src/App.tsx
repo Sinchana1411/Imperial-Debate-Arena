@@ -12,19 +12,40 @@ export default function App() {
   // Real-time dynamic pocket watch timer
   const [currentTime, setCurrentTime] = useState<string>('');
 
-  // Global browser login session state
+  // Global browser login session state with a unique user ID
   const [currentUser, setCurrentUser] = useState<{
+    id: string;
     name: string;
     role: 'favour' | 'against' | 'moderator' | 'audience';
     avatar: string;
   } | null>(null);
 
-  // Initial load of chambers from localStorage if available, else static presets
+  // WebSocket reference
+  const [socket, setSocket] = useState<WebSocket | null>(null);
+
+  // Initialize and load saved state or connect WebSocket
   useEffect(() => {
-    const saved = localStorage.getItem('vintage_debate_rooms');
-    if (saved) {
+    // 1. Core user session details check
+    const savedUser = localStorage.getItem('vintage_logged_in_user');
+    let loadedUser: any = null;
+    if (savedUser) {
       try {
-        setRooms(JSON.parse(saved));
+        const parsed = JSON.parse(savedUser);
+        // Guarantee they have a unique user ID
+        if (!parsed.id) {
+          parsed.id = `user-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+          localStorage.setItem('vintage_logged_in_user', JSON.stringify(parsed));
+        }
+        loadedUser = parsed;
+        setCurrentUser(parsed);
+      } catch (e) {}
+    }
+
+    // 2. Load rooms fallback local storage (used while socket is offline or as seed)
+    const savedRooms = localStorage.getItem('vintage_debate_rooms');
+    if (savedRooms) {
+      try {
+        setRooms(JSON.parse(savedRooms));
       } catch (e) {
         setRooms(INITIAL_DEBATE_ROOMS);
       }
@@ -32,21 +53,71 @@ export default function App() {
       setRooms(INITIAL_DEBATE_ROOMS);
     }
 
-    const savedUser = localStorage.getItem('vintage_logged_in_user');
-    if (savedUser) {
-      try {
-        setCurrentUser(JSON.parse(savedUser));
-      } catch (e) {}
+    // 3. Establish Live Assembly WebSocket connection (shares port 3000 behind proxy)
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}`;
+    
+    let ws: WebSocket;
+    let reconnectTimeout: any;
+
+    function connect() {
+      console.log("Connecting to central Assembly Ledger...", wsUrl);
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        console.log("Successfully connected to the central Assembly Ledger.");
+        setSocket(ws);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log("WebSocket message received:", data.type);
+          if (data.type === 'INIT_ROOMS') {
+            setRooms(data.rooms);
+            localStorage.setItem('vintage_debate_rooms', JSON.stringify(data.rooms));
+          } else if (data.type === 'ROOMS_UPDATED') {
+            setRooms(data.rooms);
+            localStorage.setItem('vintage_debate_rooms', JSON.stringify(data.rooms));
+          } else if (data.type === 'ROOM_UPDATED') {
+            setRooms(prev => {
+              const next = prev.map(r => r.id === data.room.id ? data.room : r);
+              localStorage.setItem('vintage_debate_rooms', JSON.stringify(next));
+              return next;
+            });
+          }
+        } catch (err) {
+          console.error("Error parsing websocket message payload:", err);
+        }
+      };
+
+      ws.onclose = () => {
+        console.warn("Assembly Ledger websocket closed. Retrying in 2.5 seconds...");
+        setSocket(null);
+        reconnectTimeout = setTimeout(connect, 2500);
+      };
+
+      ws.onerror = (err) => {
+        console.error("Assembly Ledger connection error. Toggling close...", err);
+        ws.close();
+      };
     }
+
+    connect();
+
+    return () => {
+      if (ws) ws.close();
+      clearTimeout(reconnectTimeout);
+    };
   }, []);
 
-  // Sync rooms data changes to localStorage
+  // Sync rooms data changes to central ledger or fallback locally
   const saveRooms = (updatedRooms: DebateRoom[]) => {
     setRooms(updatedRooms);
     localStorage.setItem('vintage_debate_rooms', JSON.stringify(updatedRooms));
   };
 
-  const handleLogin = (user: { name: string; role: 'favour' | 'against' | 'moderator' | 'audience'; avatar: string }) => {
+  const handleLogin = (user: { id: string; name: string; role: 'favour' | 'against' | 'moderator' | 'audience'; avatar: string }) => {
     setCurrentUser(user);
     localStorage.setItem('vintage_logged_in_user', JSON.stringify(user));
   };
@@ -74,20 +145,32 @@ export default function App() {
   }, []);
 
   const handleUpdateRoom = (updatedRoom: DebateRoom) => {
-    const newRooms = rooms.map((r) => (r.id === updatedRoom.id ? updatedRoom : r));
-    saveRooms(newRooms);
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: 'UPDATE_ROOM', room: updatedRoom }));
+    } else {
+      const newRooms = rooms.map((r) => (r.id === updatedRoom.id ? updatedRoom : r));
+      saveRooms(newRooms);
+    }
   };
 
   const handleAddRoom = (newRoom: DebateRoom) => {
-    const newRooms = [newRoom, ...rooms];
-    saveRooms(newRooms);
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: 'ADD_ROOM', room: newRoom }));
+    } else {
+      const newRooms = [newRoom, ...rooms];
+      saveRooms(newRooms);
+    }
   };
 
   const handleDeleteRoom = (roomId: string) => {
-    const newRooms = rooms.filter((r) => r.id !== roomId);
-    saveRooms(newRooms);
-    if (selectedRoomId === roomId) {
-      setSelectedRoomId(null);
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: 'DELETE_ROOM', roomId }));
+    } else {
+      const newRooms = rooms.filter((r) => r.id !== roomId);
+      saveRooms(newRooms);
+      if (selectedRoomId === roomId) {
+        setSelectedRoomId(null);
+      }
     }
   };
 
@@ -183,7 +266,7 @@ export default function App() {
 }
 
 // Innermost helper: High elegance vintage signature entry book form
-function LoginForm({ onLogin }: { onLogin: (user: { name: string; role: 'favour' | 'against' | 'moderator' | 'audience'; avatar: string }) => void }) {
+function LoginForm({ onLogin }: { onLogin: (user: { id: string; name: string; role: 'favour' | 'against' | 'moderator' | 'audience'; avatar: string }) => void }) {
   const [name, setName] = useState('Ebenezer Miller');
   const [role, setRole] = useState<'favour' | 'against' | 'moderator' | 'audience'>('favour');
   const [avatar, setAvatar] = useState('🎩');
@@ -191,7 +274,8 @@ function LoginForm({ onLogin }: { onLogin: (user: { name: string; role: 'favour'
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    onLogin({ name, role, avatar });
+    const uniqueId = `user-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    onLogin({ id: uniqueId, name, role, avatar });
   };
 
   return (

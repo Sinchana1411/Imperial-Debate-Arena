@@ -3,6 +3,9 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import { WebSocketServer, WebSocket } from "ws";
+import { INITIAL_DEBATE_ROOMS } from "./src/data";
+import { DebateRoom } from "./src/types";
 
 dotenv.config();
 
@@ -10,6 +13,9 @@ const app = express();
 app.use(express.json());
 
 const PORT = 3000;
+
+// Central in-memory registry database keeping all connected participants in sync in real-time
+let serverRooms: DebateRoom[] = JSON.parse(JSON.stringify(INITIAL_DEBATE_ROOMS));
 
 // Lazy initialization of Gemini API Client
 let aiClient: GoogleGenAI | null = null;
@@ -266,8 +272,75 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+  });
+
+  // Attach a real-time WebSocket communication server sharing the Express port
+  const wss = new WebSocketServer({ server });
+
+  wss.on('connection', (ws: WebSocket) => {
+    console.log("A legislative delegate entered the assembly connection pool.");
+
+    // Instantly transmit the central registrar chamber state on connection
+    ws.send(JSON.stringify({ type: 'INIT_ROOMS', rooms: serverRooms }));
+
+    ws.on('message', (message: string) => {
+      try {
+        const data = JSON.parse(message);
+        console.log(`Received message of type: ${data.type}`);
+
+        switch (data.type) {
+          case 'UPDATE_ROOM': {
+            const { room } = data;
+            serverRooms = serverRooms.map(r => r.id === room.id ? room : r);
+
+            // Broadcast the target room's update to all active socket connections
+            const payload = JSON.stringify({ type: 'ROOM_UPDATED', room });
+            wss.clients.forEach(client => {
+              if (client.readyState === WebSocket.OPEN) {
+                client.send(payload);
+              }
+            });
+            break;
+          }
+          case 'ADD_ROOM': {
+            const { room } = data;
+            serverRooms = [room, ...serverRooms];
+
+            // Broadcast new general rooms list 
+            const payload = JSON.stringify({ type: 'ROOMS_UPDATED', rooms: serverRooms });
+            wss.clients.forEach(client => {
+              if (client.readyState === WebSocket.OPEN) {
+                client.send(payload);
+              }
+            });
+            break;
+          }
+          case 'DELETE_ROOM': {
+            const { roomId } = data;
+            serverRooms = serverRooms.filter(r => r.id !== roomId);
+
+            // Broadcast updated rooms general list after erasure
+            const payload = JSON.stringify({ type: 'ROOMS_UPDATED', rooms: serverRooms });
+            wss.clients.forEach(client => {
+              if (client.readyState === WebSocket.OPEN) {
+                client.send(payload);
+              }
+            });
+            break;
+          }
+          default:
+            break;
+        }
+      } catch (err) {
+        console.error("Websocket incoming parsing failed:", err);
+      }
+    });
+
+    ws.on('close', () => {
+      console.log("A legislative delegate disconnected from the connection pool.");
+    });
   });
 }
 
