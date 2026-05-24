@@ -9,11 +9,16 @@ import {
 
 interface DebateRoomProps {
   room: DebateRoom;
+  currentUser?: {
+    name: string;
+    role: 'favour' | 'against' | 'moderator' | 'audience';
+    avatar: string;
+  } | null;
   onBack: () => void;
   onUpdateRoom: (updated: DebateRoom) => void;
 }
 
-export default function DebateRoomChamber({ room, onBack, onUpdateRoom }: DebateRoomProps) {
+export default function DebateRoomChamber({ room, currentUser, onBack, onUpdateRoom }: DebateRoomProps) {
   // Debate control states
   const [isSimulating, setIsSimulating] = useState(false);
   const [currentSpeakerId, setCurrentSpeakerId] = useState<string | null>(null);
@@ -24,6 +29,185 @@ export default function DebateRoomChamber({ room, onBack, onUpdateRoom }: Debate
   const [userRole, setUserRole] = useState<'audience' | 'favour' | 'against' | 'moderator'>('audience');
   const [userSpeakerName, setUserSpeakerName] = useState('Ebenezer Miller');
   const [userSpeakerAvatar, setUserSpeakerAvatar] = useState('🎩');
+
+  // Auto-login active web user to the chamber's registry based on the first-10 cap rule
+  useEffect(() => {
+    if (!currentUser) return;
+    
+    const userExists = room.participants.some(p => p.id === 'user-speaker-id');
+    if (!userExists) {
+      // Calculate current count of active speakers in this chamber (excluding user)
+      const activeOratorsCount = room.participants.filter(p => p.role !== 'audience' && p.id !== 'user-speaker-id').length;
+      let assignedRole: 'favour' | 'against' | 'moderator' | 'audience';
+      
+      if (activeOratorsCount < 10) {
+        // Under 10 participants, assign active debater seat
+        if (currentUser.role !== 'audience') {
+          assignedRole = currentUser.role;
+        } else {
+          // If they wanted audience, but we make first 10 participants, alternate team
+          const favourCount = room.participants.filter(p => p.role === 'favour').length;
+          const againstCount = room.participants.filter(p => p.role === 'against').length;
+          assignedRole = favourCount <= againstCount ? 'favour' : 'against';
+        }
+      } else {
+        // Capacity reached, enforce audience spectating seat
+        assignedRole = 'audience';
+      }
+
+      const userParticipant: Participant = {
+        id: 'user-speaker-id',
+        name: currentUser.name,
+        role: assignedRole,
+        avatar: currentUser.avatar,
+        avatarSeed: 'user-avatar-seed',
+        isMuted: false,
+        isVideoOff: false,
+        bio: assignedRole === 'audience' 
+          ? 'Gallery Spectator. Seated on the registry due to chamber limits.' 
+          : 'Active Legislative Gown. Deliberating on the benches.'
+      };
+
+      onUpdateRoom({
+        ...room,
+        participants: [...room.participants, userParticipant],
+        chat: [
+          ...room.chat,
+          {
+            id: `login-join-${Date.now()}`,
+            sender: 'AI Toastmaster',
+            senderType: 'ai',
+            text: `🖋️ Registry Entry: ${currentUser.name} signed in. ${
+              assignedRole === 'audience'
+                ? 'Active benches are fully occupied (10/10). Seated in the Gallery Spectating Section.'
+                : `Seated as active Orator with the ${assignedRole === 'favour' ? 'Affirmative Guild' : 'Negative Guild'}.`
+            }`,
+            timestamp: 'Just now'
+          }
+        ]
+      });
+
+      setUserRole(assignedRole);
+      setUserSpeakerName(currentUser.name);
+      setUserSpeakerAvatar(currentUser.avatar);
+    } else {
+      const registeredUser = room.participants.find(p => p.id === 'user-speaker-id');
+      if (registeredUser) {
+        setUserRole(registeredUser.role);
+        setUserSpeakerName(registeredUser.name);
+        setUserSpeakerAvatar(registeredUser.avatar);
+      }
+    }
+  }, [room.id, currentUser]);
+
+  // Handler for manual checking-in of simulated guest entries to test limits easily
+  const handleCheckInAttendee = (guestName: string, requestedRole: 'favour' | 'against' | 'moderator' | 'audience') => {
+    if (!guestName.trim()) return;
+
+    const activeOratorsCount = room.participants.filter(p => p.role !== 'audience').length;
+    let assignedRole: 'favour' | 'against' | 'moderator' | 'audience';
+
+    if (activeOratorsCount < 10) {
+      if (requestedRole !== 'audience') {
+        assignedRole = requestedRole;
+      } else {
+        const favourCount = room.participants.filter(p => p.role === 'favour').length;
+        const againstCount = room.participants.filter(p => p.role === 'against').length;
+        assignedRole = favourCount <= againstCount ? 'favour' : 'against';
+      }
+    } else {
+      assignedRole = 'audience';
+    }
+
+    const avatars = ['🎩', '🎓', '🗣️', '🖋️', '🔍'];
+    const chosenAvatar = avatars[Math.floor(Math.random() * avatars.length)];
+
+    const newGuest: Participant = {
+      id: `p-guest-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      name: guestName,
+      role: assignedRole,
+      avatar: chosenAvatar,
+      avatarSeed: `guest-${Date.now()}`,
+      isMuted: false,
+      isVideoOff: false,
+      bio: assignedRole === 'audience' 
+        ? 'Gallery Spectator. Signed into seat.' 
+        : 'Active Legislative Gown. Checked into debating benches.'
+    };
+
+    onUpdateRoom({
+      ...room,
+      participants: [...room.participants, newGuest],
+      chat: [
+        ...room.chat,
+        {
+          id: `guest-join-${Date.now()}`,
+          sender: 'AI Toastmaster',
+          senderType: 'ai',
+          text: `🖋️ Guest Registered: ${guestName} logged in. Assigned to ${
+            assignedRole === 'audience' ? 'Gallery Audience Spectator' : `Active Debating Gown (${assignedRole.toUpperCase()})`
+          }.`,
+          timestamp: 'Just now'
+        }
+      ]
+    });
+  };
+
+  // Updaters for changing active user affiliation
+  const handleUpdateUserStatus = (roleChoice: 'favour' | 'against' | 'moderator' | 'audience') => {
+    const existingRef = room.participants.find(p => p.id === 'user-speaker-id');
+    const wasAudience = existingRef ? existingRef.role === 'audience' : true;
+    const isRequestingActive = roleChoice !== 'audience';
+
+    let finalRole = roleChoice;
+
+    if (wasAudience && isRequestingActive) {
+      const activeOratorsCount = room.participants.filter(p => p.id !== 'user-speaker-id' && p.role !== 'audience').length;
+      if (activeOratorsCount >= 10) {
+        alert("Chamber Active capacity reached! There are already 10 active debating delegates seated. You can only join as a spectating Gallery Audience.");
+        finalRole = 'audience';
+      }
+    }
+
+    const updatedParticipants = room.participants.map(p => {
+      if (p.id === 'user-speaker-id') {
+        return {
+          ...p,
+          role: finalRole,
+          bio: finalRole === 'audience'
+            ? 'Gallery Spectator. Seated on the registry due to chamber limits.'
+            : 'Active Legislative Gown. Deliberating on the benches.'
+        };
+      }
+      return p;
+    });
+
+    onUpdateRoom({
+      ...room,
+      participants: updatedParticipants
+    });
+
+    setUserRole(finalRole);
+  };
+
+  const handleUpdateUserNameAndAvatar = (newName: string, newAvatar: string) => {
+    if (!newName.trim()) return;
+    
+    const updatedParticipants = room.participants.map(p => {
+      if (p.id === 'user-speaker-id') {
+        return { ...p, name: newName, avatar: newAvatar };
+      }
+      return p;
+    });
+
+    onUpdateRoom({
+      ...room,
+      participants: updatedParticipants
+    });
+
+    setUserSpeakerName(newName);
+    setUserSpeakerAvatar(newAvatar);
+  };
   
   // Custom transcription draft board
   const [userDraftNotes, setUserDraftNotes] = useState('');
@@ -475,7 +659,7 @@ export default function DebateRoomChamber({ room, onBack, onUpdateRoom }: Debate
   };
 
   // Helper: Request AI scoring and push onto transcript logs
-  const judgeSpeechAndAppend = async (speakerId: string, speakerName: string, role: 'favour' | 'against' | 'moderator', text: string) => {
+  const judgeSpeechAndAppend = async (speakerId: string, speakerName: string, role: 'favour' | 'against' | 'moderator' | 'audience', text: string) => {
     setIsJudging(true);
     
     // Simulate speech buffer taking 2 seconds visually
@@ -499,7 +683,7 @@ export default function DebateRoomChamber({ room, onBack, onUpdateRoom }: Debate
           id: `speech-${Date.now()}`,
           speakerId: speakerId,
           speakerName: speakerName,
-          team: role,
+          team: role === 'audience' ? 'moderator' : role,
           text: text,
           scores: assessment.scores,
           aiCommentary: assessment.commentary,
@@ -621,6 +805,11 @@ export default function DebateRoomChamber({ room, onBack, onUpdateRoom }: Debate
   // Separate participants by sides
   const favourMembers = room.participants.filter(p => p.role === 'favour');
   const againstMembers = room.participants.filter(p => p.role === 'against');
+
+  // Filter lists for Zoom Grid and Capacity calculations
+  const otherActiveParticipants = room.participants.filter(p => p.id !== 'user-speaker-id' && p.role !== 'audience');
+  const activeParticipantsCount = room.participants.filter(p => p.role !== 'audience').length;
+  const audienceMembersCount = room.participants.filter(p => p.role === 'audience').length;
 
   return (
     <div className="space-y-6">
@@ -769,8 +958,8 @@ export default function DebateRoomChamber({ room, onBack, onUpdateRoom }: Debate
                 )}
               </div>
 
-              {/* 10 ZOOM FEEDS FOR LIVE ORATOR PRESETS */}
-              {room.participants.map((member) => {
+              {/* ZOOM FEEDS FOR REGISTERED DEBATING ORATORS */}
+              {otherActiveParticipants.map((member) => {
                 const isActiveSpeaker = currentSpeakerId === member.id;
                 const mPoll = room.speakerPolls[member.id] || { agree: 10, disagree: 6 };
                 return (
@@ -1024,7 +1213,7 @@ export default function DebateRoomChamber({ room, onBack, onUpdateRoom }: Debate
                 <span className="font-display text-[10px] uppercase font-bold tracking-wider text-amber-900/70">Your Active Gown</span>
                 <select 
                   value={userRole} 
-                  onChange={(e) => setUserRole(e.target.value as any)}
+                  onChange={(e) => handleUpdateUserStatus(e.target.value as any)}
                   className="w-full bg-[#ebdcb2]/40 border border-amber-950 p-2 text-xs font-serif focus:outline-none"
                 >
                   <option value="audience">Spectator (Audience Seat)</option>
@@ -1041,7 +1230,7 @@ export default function DebateRoomChamber({ room, onBack, onUpdateRoom }: Debate
                     <input 
                       type="text" 
                       value={userSpeakerName} 
-                      onChange={(e) => setUserSpeakerName(e.target.value)}
+                      onChange={(e) => handleUpdateUserNameAndAvatar(e.target.value, userSpeakerAvatar)}
                       className="w-full bg-[#ebdcb2]/40 border border-amber-950 p-1.5 text-xs font-serif focus:outline-none"
                     />
                   </div>
@@ -1049,8 +1238,8 @@ export default function DebateRoomChamber({ room, onBack, onUpdateRoom }: Debate
                     <span className="font-display text-[10px] uppercase font-bold tracking-wider text-amber-900/70">Wig / Hat Icon</span>
                     <select
                       value={userSpeakerAvatar}
-                      onChange={(e) => setUserSpeakerAvatar(e.target.value)}
-                      className="w-full bg-[#ebdcb2]/40 border border-amber-950 p-1.5 text-xs focus:outline-none"
+                      onChange={(e) => handleUpdateUserNameAndAvatar(userSpeakerName, e.target.value)}
+                      className="w-full bg-[#ebdcb2]/40 border border-[#3d2f24] p-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-amber-950"
                     >
                       <option value="🎩">🎩 Top Hat</option>
                       <option value="🎓">🎓 Academic Wig</option>
@@ -1059,9 +1248,9 @@ export default function DebateRoomChamber({ room, onBack, onUpdateRoom }: Debate
                       <option value="🔍">🔍 Magnifying Glass</option>
                     </select>
                   </div>
-                  <div className="text-center">
-                    <span className="text-[10px] font-semibold text-green-800 bg-green-100 px-2 py-1 border border-green-800 rounded-sm inline-block">
-                      ✓ SEAT SECURED
+                  <div className="text-center font-serif">
+                    <span className="text-[10px] font-semibold text-green-800 bg-green-100 px-2.5 py-1 border border-green-800 rounded-sm inline-block uppercase tracking-wider">
+                      ✓ Seat Secured
                     </span>
                   </div>
                 </>
@@ -1151,6 +1340,135 @@ export default function DebateRoomChamber({ room, onBack, onUpdateRoom }: Debate
                 — You are listening silently from the gallery floor. Claim an orator wig above to debate and run transcriber drafts. —
               </p>
             )}
+          </VintageCard>
+
+          {/* Gown Allocation & Guest Sign-In Chest */}
+          <VintageCard title="🖋️ Assembly Registration Guest Ledger" subtitle="Log in attendees to test physical seat capacities">
+            <div className="space-y-4 font-serif text-amber-950">
+              <p className="text-xs text-amber-900 font-serif italic mb-2">
+                "To simulate multiple concurrent attendees signing in on the website, register guest delegate names below. The first 10 active check-ins are seated on the main active benches with physical video grids. All subsequent logins are automatically situated on the high gallery seats."
+              </p>
+
+              <div className="flex flex-col sm:flex-row gap-2 items-end bg-[#ebdcb2]/30 p-4 border border-amber-950/20 rounded-sm">
+                <div className="flex-1 w-full">
+                  <label className="block text-[10px] font-mono tracking-wider text-amber-900/80 uppercase mb-1">Guest Name</label>
+                  <input 
+                    type="text"
+                    id="guest-name-input"
+                    placeholder="e.g. Lord Harrington"
+                    className="w-full bg-[#f4edd8]/90 border border-[#3d2f24] p-1.5 text-xs text-amber-950 font-serif focus:outline-none"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const nameEl = document.getElementById('guest-name-input') as HTMLInputElement;
+                        const roleEl = document.getElementById('guest-role-select') as HTMLSelectElement;
+                        if (nameEl && nameEl.value.trim() && roleEl) {
+                          handleCheckInAttendee(nameEl.value, roleEl.value as any);
+                          nameEl.value = '';
+                        }
+                      }
+                    }}
+                  />
+                </div>
+
+                <div className="w-full sm:w-auto">
+                  <label className="block text-[10px] font-mono tracking-wider text-amber-900/80 uppercase mb-1">Gown Preferred</label>
+                  <select 
+                    id="guest-role-select"
+                    className="w-full bg-[#f4edd8]/90 border border-[#3d2f24] p-1.5 text-xs font-serif focus:outline-none"
+                  >
+                    <option value="favour">Affirmative Gown</option>
+                    <option value="against">Negative Gown</option>
+                    <option value="moderator">Moderator</option>
+                    <option value="audience">Audience Spectator</option>
+                  </select>
+                </div>
+
+                <div className="w-full sm:w-auto">
+                  <button
+                    onClick={() => {
+                      const nameInput = document.getElementById('guest-name-input') as HTMLInputElement;
+                      const roleSelect = document.getElementById('guest-role-select') as HTMLSelectElement;
+                      if (nameInput && nameInput.value.trim() && roleSelect) {
+                        handleCheckInAttendee(nameInput.value, roleSelect.value as any);
+                        nameInput.value = '';
+                      }
+                    }}
+                    className="w-full px-4 py-2 bg-[#3d2f24] hover:bg-[#ebdcb2] hover:text-[#3d2f24] border border-[#3d2f24] text-[#f4edd8] text-[9px] uppercase font-bold tracking-widest transition-all rounded-xs cursor-pointer"
+                  >
+                    Add to Ledger
+                  </button>
+                </div>
+              </div>
+
+              {/* Live statistics of seat usage */}
+              <div className="grid grid-cols-2 gap-2 text-[10px] font-mono bg-stone-900 p-3 text-center rounded border border-amber-950/40 mt-3">
+                <div className="border-r border-amber-950/20">
+                  <span className="text-amber-500 block">ORATOR BENCHES (MAX 10)</span>
+                  <span className="font-bold text-amber-100 text-xs">{activeParticipantsCount} / 10 Seated</span>
+                </div>
+                <div>
+                  <span className="text-blue-400 block">GALLERY SPECTATORS</span>
+                  <span className="font-bold text-blue-100 text-xs">{audienceMembersCount} Spectators</span>
+                </div>
+              </div>
+
+              {/* List of checked in people */}
+              {room.participants.length > 0 && (
+                <div className="mt-4 border-t border-amber-950/15 pt-3">
+                  <span className="block text-[10px] font-display font-black uppercase text-amber-950/80 tracking-wider mb-2">
+                    Assembly Registry Book ({room.participants.length} Seated Delegates)
+                  </span>
+                  <div className="max-h-40 overflow-y-auto space-y-1.5 font-mono text-[10px] text-amber-950 bg-[#ebdcb2]/20 p-3 rounded border border-amber-950/15">
+                    {room.participants.map((p) => (
+                      <div key={p.id} className="flex justify-between items-center border-b border-amber-950/5 pb-1.5 last:border-0 last:pb-0">
+                        <div className="flex items-center gap-1.5 truncate">
+                          <span className="text-xs">{p.avatar}</span>
+                          <span className="font-medium truncate">{p.name} {p.id === 'user-speaker-id' && <strong className="text-amber-900 font-extrabold">(YOU)</strong>}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`px-2 py-0.5 rounded-sm text-[8px] font-extrabold font-mono uppercase tracking-wider ${
+                            p.role === 'audience' 
+                              ? 'bg-blue-100/80 text-blue-800 border border-blue-200' 
+                              : p.role === 'favour' 
+                                ? 'bg-amber-100/90 text-amber-800 border border-amber-200' 
+                                : p.role === 'against' 
+                                  ? 'bg-red-100/90 text-red-800 border border-red-200'
+                                  : 'bg-purple-100/90 text-purple-800 border border-purple-200'
+                          }`}>
+                            {p.role}
+                          </span>
+                          {p.id !== 'user-speaker-id' && (
+                            <button
+                              onClick={() => {
+                                const cleared = room.participants.filter(pt => pt.id !== p.id);
+                                onUpdateRoom({
+                                  ...room,
+                                  participants: cleared,
+                                  chat: [
+                                    ...room.chat,
+                                    {
+                                      id: `guest-leave-${Date.now()}`,
+                                      sender: 'AI Toastmaster',
+                                      senderType: 'ai',
+                                      text: `🖋️ Log Out: ${p.name} signed out and left the assembly halls.`,
+                                      timestamp: 'Just now'
+                                    }
+                                  ]
+                                });
+                              }}
+                              className="text-red-800 hover:text-red-500 font-bold px-1"
+                              title="Delete guest from registry"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </VintageCard>
 
           {/* Automative Typewriter Transcription Archives Block */}

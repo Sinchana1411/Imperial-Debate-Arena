@@ -1,7 +1,7 @@
 export interface Participant {
   id: string;
   name: string;
-  role: 'favour' | 'against' | 'moderator';
+  role: 'favour' | 'against' | 'moderator' | 'audience';
   avatar: string;
   isMuted: boolean;
   isVideoOff: boolean;

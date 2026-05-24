@@ -55,7 +55,7 @@ export default function RoomDashboard({
       onModifyRoom(updated);
       setEditId(null);
     } else {
-      // Create a fresh chamber with a default suite of 10 simulation participants
+      // Create a fresh chamber with a clean, empty state ready for logins
       const fresh: DebateRoom = {
         id: `room-${Date.now()}`,
         topic: newTopic,
@@ -70,19 +70,7 @@ export default function RoomDashboard({
           { id: 'start-welcome', sender: 'AI Toastmaster', senderType: 'ai', text: 'Decorum is requested as this chamber opens to the floor.', timestamp: 'Just now' }
         ],
         speeches: [],
-        participants: [
-          { id: `p-f-${Date.now()}-1`, name: 'Dr. Archibald Sterling', role: 'favour', avatar: '🎓', avatarSeed: 'arch', isMuted: true, isVideoOff: false, bio: 'Proponent of traditionalist forms.' },
-          { id: `p-f-${Date.now()}-2`, name: 'Beatrice Thorne', role: 'favour', avatar: '🖋️', avatarSeed: 'beat', isMuted: true, isVideoOff: false, bio: 'Classical poet.' },
-          { id: `p-f-${Date.now()}-3`, name: 'Professor Arthur Pendelton', role: 'favour', avatar: '🕵️‍♂️', avatarSeed: 'arthur', isMuted: true, isVideoOff: true, bio: 'Skeptic of automation.' },
-          { id: `p-f-${Date.now()}-4`, name: 'Flora Vance', role: 'favour', avatar: '🎨', avatarSeed: 'flora', isMuted: true, isVideoOff: false, bio: 'Curator of early master works.' },
-          { id: `p-f-${Date.now()}-5`, name: 'Lord Sterling', role: 'favour', avatar: '🎩', avatarSeed: 'lord', isMuted: true, isVideoOff: false, bio: 'Philosophical traditionalist.' },
-          
-          { id: `p-a-${Date.now()}-1`, name: 'Ada Lovelace', role: 'against', avatar: '⚡', avatarSeed: 'ada', isMuted: true, isVideoOff: false, bio: 'Pioneering mathematical programmer.' },
-          { id: `p-a-${Date.now()}-2`, name: 'Richard Arkwright', role: 'against', avatar: '⚙️', avatarSeed: 'rich', isMuted: true, isVideoOff: false, bio: 'Industrial automation superintendent.' },
-          { id: `p-a-${Date.now()}-3`, name: 'Cassandra Gray', role: 'against', avatar: '🔋', avatarSeed: 'cass', isMuted: true, isVideoOff: false, bio: 'Cybernetic scholar.' },
-          { id: `p-a-${Date.now()}-4`, name: 'Vincent Cole', role: 'against', avatar: '📟', avatarSeed: 'vinc', isMuted: true, isVideoOff: true, bio: 'Telegraph engineer.' },
-          { id: `p-a-${Date.now()}-5`, name: 'Julian Huxley', role: 'against', avatar: '🔬', avatarSeed: 'jul', isMuted: true, isVideoOff: false, bio: 'Evolutionist theoretician.' }
-        ]
+        participants: []
       };
       onAddRoom(fresh);
     }
