@@ -3,7 +3,9 @@ import { INITIAL_DEBATE_ROOMS } from './data';
 import { DebateRoom } from './types';
 import RoomDashboard from './components/RoomDashboard';
 import DebateRoomChamber from './components/DebateRoom';
-import { Clock, Ship, CalendarClock, LogOut } from 'lucide-react';
+import { Clock, Ship, CalendarClock, LogOut, Database, Settings, ShieldCheck, Copy, Check, Info } from 'lucide-react';
+import { supabase, getSupabaseConfig, saveSupabaseOverride, getLiveKitConfig, saveLiveKitOverride } from './lib/supabaseClient';
+import { fetchFullSupabaseRoom, listSupabaseRooms, saveSupabaseRoomMeta, deleteSupabaseRoom, SQL_SCHEMA_MIGRATION } from './lib/supabaseSync';
 
 export default function App() {
   const [rooms, setRooms] = useState<DebateRoom[]>([]);
@@ -22,6 +24,13 @@ export default function App() {
 
   // WebSocket reference
   const [socket, setSocket] = useState<WebSocket | null>(null);
+
+  // Supabase & LiveKit Dynamic Configuration settings states
+  const [showSettings, setShowSettings] = useState(false);
+  const [supabaseOverrideUrl, setSupabaseOverrideUrl] = useState(getSupabaseConfig().url);
+  const [supabaseOverrideKey, setSupabaseOverrideKey] = useState('');
+  const [liveKitOverrideUrl, setLiveKitOverrideUrl] = useState(getLiveKitConfig().url);
+  const [copiedSql, setCopiedSql] = useState(false);
 
   // Initialize and load saved state or connect WebSocket
   useEffect(() => {
@@ -111,6 +120,54 @@ export default function App() {
     };
   }, []);
 
+  // 4. Live Cloud Supabase Database Real-time Channel synchronization
+  useEffect(() => {
+    if (!supabase) return;
+
+    console.log("Supabase Integration verified. Seeding assembly registers...");
+    let active = true;
+
+    async function initialDbSync() {
+      try {
+        const loaded = await listSupabaseRooms();
+        if (active && loaded.length > 0) {
+          setRooms(loaded);
+        }
+      } catch (err) {
+        console.warn("Error bootstrapping Supabase room meta records", err);
+      }
+    }
+    initialDbSync();
+
+    // Listen to real-time broadcasts on public schema changes to keep multi-user synchronized
+    const channel = supabase
+      .channel('public:debate_all_tables')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'debate_rooms' }, async () => {
+        const loaded = await listSupabaseRooms();
+        if (active) setRooms(loaded);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'debate_participants' }, async () => {
+        const loaded = await listSupabaseRooms();
+        if (active) setRooms(loaded);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'debate_messages' }, async () => {
+        const loaded = await listSupabaseRooms();
+        if (active) setRooms(loaded);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'debate_speeches' }, async () => {
+        const loaded = await listSupabaseRooms();
+        if (active) setRooms(loaded);
+      })
+      .subscribe();
+
+    return () => {
+      active = false;
+      try {
+        supabase.removeChannel(channel);
+      } catch (e) {}
+    };
+  }, []);
+
   // Sync rooms data changes to central ledger or fallback locally
   const saveRooms = (updatedRooms: DebateRoom[]) => {
     setRooms(updatedRooms);
@@ -144,7 +201,11 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  const handleUpdateRoom = (updatedRoom: DebateRoom) => {
+  const handleUpdateRoom = async (updatedRoom: DebateRoom) => {
+    if (supabase) {
+      await saveSupabaseRoomMeta(updatedRoom);
+    }
+
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: 'UPDATE_ROOM', room: updatedRoom }));
     } else {
@@ -153,7 +214,11 @@ export default function App() {
     }
   };
 
-  const handleAddRoom = (newRoom: DebateRoom) => {
+  const handleAddRoom = async (newRoom: DebateRoom) => {
+    if (supabase) {
+      await saveSupabaseRoomMeta(newRoom);
+    }
+
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: 'ADD_ROOM', room: newRoom }));
     } else {
@@ -162,7 +227,11 @@ export default function App() {
     }
   };
 
-  const handleDeleteRoom = (roomId: string) => {
+  const handleDeleteRoom = async (roomId: string) => {
+    if (supabase) {
+      await deleteSupabaseRoom(roomId);
+    }
+
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: 'DELETE_ROOM', roomId }));
     } else {
@@ -209,39 +278,221 @@ export default function App() {
       {/* Decorative Outer Masthead Scroll Frame */}
       <div className="max-w-7xl mx-auto px-4 md:px-8 relative z-10 space-y-6">
         
-        {/* Top Mini utility Row: Simulated Status Indicator & Pocket Watch and Gavel Indicators */}
-        <div className="flex flex-col sm:flex-row items-center justify-between border-b border-amber-950/20 pb-2 text-xs font-mono text-amber-900">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <Ship className="w-3.5 h-3.5 text-amber-900" />
-            <span className="font-display font-medium uppercase tracking-wider text-[10px]">
-              Chamber Guild Delegate Desk
-            </span>
-            <div className="h-3 w-[1px] bg-amber-950/20 mx-2 hidden sm:block" />
-            <span className="font-sans text-[10px] text-amber-950 font-bold bg-[#f4edd8] px-2 py-0.5 rounded border border-amber-950/10">
-              Active Session: {currentUser.avatar} {currentUser.name} ({currentUser.role.toUpperCase()})
-            </span>
-            <button 
-              onClick={handleLogout}
-              className="text-[#c0392b] hover:text-[#e74c3c] transition-colors ml-2 font-bold cursor-pointer text-[10px] uppercase flex items-center gap-1 border-b border-dashed border-[#c0392b]"
-            >
-              <LogOut className="w-3 h-3" />
-              <span>Sign Out</span>
-            </button>
+        {/* Top Mini utility Row: Live Cloud Status, Settings & Pocket Watch Indicators */}
+        <div className="flex flex-col gap-2 border-b border-amber-950/20 pb-3 text-xs font-mono text-amber-900">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <Ship className="w-3.5 h-3.5 text-amber-900" />
+              <span className="font-display font-medium uppercase tracking-wider text-[10px]">
+                Chamber Guild Delegate Desk
+              </span>
+              <div className="h-3 w-[1px] bg-amber-950/20 mx-2 hidden sm:block" />
+              <span className="font-sans text-[10px] text-amber-950 font-bold bg-[#f4edd8] px-2 py-0.5 rounded border border-amber-950/10">
+                Active Session: {currentUser.avatar} {currentUser.name} ({currentUser.role.toUpperCase()})
+              </span>
+              <button 
+                onClick={handleLogout}
+                className="text-[#c0392b] hover:text-[#e74c3c] transition-colors ml-2 font-bold cursor-pointer text-[10px] uppercase flex items-center gap-1 border-b border-dashed border-[#c0392b]"
+              >
+                <LogOut className="w-3 h-3" />
+                <span>Sign Out</span>
+              </button>
+            </div>
+
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => setShowSettings(!showSettings)}
+                className="flex items-center gap-1.5 bg-[#ebdcb2] border border-amber-950/30 hover:bg-[#ebd097] text-amber-950 px-2.5 py-1 rounded transition-colors text-[10px] uppercase font-bold cursor-pointer"
+              >
+                <Settings className="w-3.5 h-3.5" />
+                <span>Settings & SQL Schema</span>
+              </button>
+
+              {/* Visual Watch indicator */}
+              <div className="flex items-center gap-1.5 bg-[#f4edd8] px-3 py-1 rounded-full border border-amber-950/25">
+                <Clock className="w-3.5 h-3.5 text-amber-800" />
+                <span className="font-bold text-amber-950 text-[11px]">{currentTime}</span>
+              </div>
+            </div>
           </div>
 
-          <div className="flex items-center gap-4 mt-2 sm:mt-0">
-            {/* Visual Watch indicator */}
-            <div className="flex items-center gap-1.5 bg-[#f4edd8] px-3 py-1 rounded-full border border-amber-950/25">
-              <Clock className="w-3.5 h-3.5 text-amber-800" />
-              <span className="font-bold text-amber-950 text-[11px]">{currentTime}</span>
+          {/* Connection Status Sub-row */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1.5 border-t border-amber-950/10 pt-2 text-[10px]">
+            <div className="flex items-center gap-3.5 flex-wrap">
+              <div className="flex items-center gap-1.5">
+                <Database className="w-3.5 h-3.5" />
+                <span>Supabase Ledger:</span>
+                {getSupabaseConfig().isConfigured ? (
+                  <span className="text-emerald-800 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-300">
+                    🟢 Cloud Sync Active ({getSupabaseConfig().source})
+                  </span>
+                ) : (
+                  <span className="text-amber-800 font-medium bg-amber-50 px-1.5 py-0.5 rounded border border-amber-300">
+                    🟡 Assembly Room Memory fallback
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5" />
+                <span>LiveKit Stream:</span>
+                {getLiveKitConfig().isConfigured ? (
+                  <span className="text-emerald-800 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-300">
+                    🟢 Voice Grid Ready
+                  </span>
+                ) : (
+                  <span className="text-amber-800 font-medium bg-amber-50 px-1.5 py-0.5 rounded border border-amber-300">
+                    🟡 Acoustic Audio Simulator
+                  </span>
+                )}
+              </div>
             </div>
-            
-            <div className="hidden md:flex items-center gap-1">
-              <CalendarClock className="w-3 h-3" />
-              <span>Session: Summer Synodus 2026</span>
+
+            <div className="text-amber-900/60 font-sans italic">
+              Assembly Code: <span className="underline font-bold font-mono">#{selectedRoomId || "dashboard"}</span>
             </div>
           </div>
         </div>
+
+        {/* Credentials and SQL Schema Configuration Panel Overlay */}
+        {showSettings && (
+          <div className="parchment border-4 border-amber-950 p-6 rounded-sm shadow-xl space-y-4 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center border-b border-amber-950/20 pb-2">
+              <div className="flex items-center gap-2">
+                <Database className="w-4 h-4 text-amber-950" />
+                <h2 className="text-sm uppercase font-bold text-amber-950 tracking-wider">
+                  Chamber Connection & Credentials Ledger
+                </h2>
+              </div>
+              <button
+                onClick={() => setShowSettings(false)}
+                className="text-amber-900 hover:text-black font-bold font-mono text-sm uppercase px-1.5 border border-amber-950/20 hover:border-black rounded"
+              >
+                ✕ Close
+              </button>
+            </div>
+
+            <p className="text-xs text-amber-950/80 leading-relaxed font-sans">
+              Connect these vintage debates to your real <strong>Supabase</strong> database ledger for persistent cloud storage and <strong>LiveKit Cloud</strong> for crystal-clear microphone audio streams between active speakers.
+            </p>
+
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              saveSupabaseOverride(supabaseOverrideUrl, supabaseOverrideKey);
+              saveLiveKitOverride(liveKitOverrideUrl);
+              setShowSettings(false);
+            }} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              
+              {/* Supabase Parameters */}
+              <div className="space-y-3 bg-[#ebdcb2]/40 p-3.5 rounded border border-amber-950/20">
+                <h3 className="text-xs uppercase font-extrabold text-amber-950/90 border-b border-amber-950/10 pb-1">
+                  🌐 Supabase DB Ledger
+                </h3>
+                
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-amber-950 mb-1">
+                    Supabase Project URL
+                  </label>
+                  <input
+                    type="url"
+                    value={supabaseOverrideUrl}
+                    onChange={(e) => setSupabaseOverrideUrl(e.target.value)}
+                    placeholder="https://your-project-id.supabase.co"
+                    className="w-full text-xs font-mono bg-stone-50 border border-amber-950/30 p-1.5 rounded text-amber-950"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-amber-950 mb-1">
+                    Supabase Anon/Public Key (or Service Role)
+                  </label>
+                  <input
+                    type="password"
+                    value={supabaseOverrideKey}
+                    onChange={(e) => setSupabaseOverrideKey(e.target.value)}
+                    placeholder="eyJhbGciOi..."
+                    className="w-full text-xs font-mono bg-stone-50 border border-amber-950/30 p-1.5 rounded text-amber-950"
+                  />
+                  <p className="text-[9px] text-amber-900/60 mt-1 italic font-sans">
+                    Leave password blank to preserve current key override or ENV parameters.
+                  </p>
+                </div>
+              </div>
+
+              {/* LiveKit Voice Parameters */}
+              <div className="space-y-3 bg-[#ebdcb2]/40 p-3.5 rounded border border-amber-950/20">
+                <h3 className="text-xs uppercase font-extrabold text-[#c0392b] border-b border-amber-950/10 pb-1">
+                  🎙️ LiveKit Voice Cloud
+                </h3>
+
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-amber-950 mb-1">
+                    LiveKit Server URL
+                  </label>
+                  <input
+                    type="text"
+                    value={liveKitOverrideUrl}
+                    onChange={(e) => setLiveKitOverrideUrl(e.target.value)}
+                    placeholder="wss://your-host.livekit.cloud"
+                    className="w-full text-xs font-mono bg-stone-50 border border-amber-950/30 p-1.5 rounded text-amber-950"
+                  />
+                  <p className="text-[9px] text-amber-900/60 mt-1 italic font-sans font-medium">
+                    Keys are stored securely server-side. Set <code>LIVEKIT_API_KEY</code> &amp; <code>LIVEKIT_API_SECRET</code> in the applet Settings (Gear Icon) to authenticate.
+                  </p>
+                </div>
+
+                <div className="pt-2 flex justify-end gap-2 text-[10px]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      saveSupabaseOverride('', 'CLEAR');
+                      saveLiveKitOverride('');
+                      setShowSettings(false);
+                    }}
+                    className="px-2.5 py-1.5 bg-[#ebdcb2]/30 text-amber-950 border border-amber-950/30 hover:bg-red-50 hover:text-[#c0392b] rounded cursor-pointer uppercase font-extrabold transition-colors"
+                  >
+                    Clear Overrides
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-3.5 py-1.5 bg-amber-950 text-white hover:bg-amber-900 rounded font-bold uppercase tracking-wider cursor-pointer shadow transition-colors"
+                  >
+                    Save &amp; Syncload
+                  </button>
+                </div>
+              </div>
+            </form>
+
+            {/* SQL Table Migration Code Section */}
+            <div className="bg-[#fcfaf2] border border-amber-950/30 rounded p-4 space-y-2">
+              <div className="flex items-center justify-between border-b border-amber-950/10 pb-1.5">
+                <div className="flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-emerald-800" />
+                  <span className="text-[11px] font-extrabold uppercase text-amber-900 font-display">
+                    Step 2: Run Postgres Database Tables in Supabase Console
+                  </span>
+                </div>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(SQL_SCHEMA_MIGRATION);
+                    setCopiedSql(true);
+                    setTimeout(() => setCopiedSql(false), 2000);
+                  }}
+                  className="flex items-center gap-1 text-[9px] font-bold text-amber-950 bg-[#ebdcb2] border border-amber-950/20 px-2 py-0.5 rounded hover:bg-[#ebd097] cursor-pointer"
+                >
+                  {copiedSql ? <Check className="w-3 h-3 text-emerald-800" /> : <Copy className="w-3 h-3" />}
+                  <span>{copiedSql ? "Sql Copied!" : "Copy SQL Script"}</span>
+                </button>
+              </div>
+              <p className="text-[10px] text-amber-900/70 font-sans leading-relaxed">
+                Open your Supabase project&apos;s <strong>SQL Editor</strong>, paste this setup script, and click <kbd className="bg-stone-200 px-1 rounded border">Run</kbd>. This provisions the tables and hooks up Supabase Realtime so active speakers align instantly!
+              </p>
+              <pre className="text-[9px] font-mono text-stone-700 bg-stone-100 p-2.5 rounded max-h-[140px] overflow-y-auto border border-stone-200">
+                {SQL_SCHEMA_MIGRATION}
+              </pre>
+            </div>
+          </div>
+        )}
 
         {/* Dynamic Route Switching */}
         {selectedRoomId && selectedRoom ? (

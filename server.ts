@@ -12,6 +12,50 @@ dotenv.config();
 const app = express();
 app.use(express.json());
 
+// API Route: LiveKit access token dispenser
+app.post("/api/livekit/token", async (req, res) => {
+  const { room, identity, name } = req.body;
+  if (!room || !identity) {
+    return res.status(400).json({ error: "Room and identity are required." });
+  }
+
+  const apiKey = process.env.LIVEKIT_API_KEY;
+  const apiSecret = process.env.LIVEKIT_API_SECRET;
+  const livekitUrl = process.env.LIVEKIT_URL;
+
+  if (!apiKey || !apiSecret || !livekitUrl) {
+    return res.json({
+      token: "DEMO_TOKEN_FALLBACK",
+      livekitUrl: "ws://localhost:3000/mock-livekit",
+      isDemo: true,
+      message: "LiveKit credentials are not fully configured. Using simulated RTC local audio sync."
+    });
+  }
+
+  try {
+    const { AccessToken } = await import("livekit-server-sdk");
+    const at = new AccessToken(apiKey, apiSecret, {
+      identity: identity,
+      name: name || identity,
+    });
+    at.addGrant({
+      roomJoin: true,
+      room: room,
+      canPublish: true,
+      canSubscribe: true,
+      canPublishData: true,
+    });
+    const token = await at.toJwt();
+    res.json({
+      token,
+      livekitUrl,
+      isDemo: false
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to generate LiveKit token" });
+  }
+});
+
 const PORT = 3000;
 
 // Central in-memory registry database keeping all connected participants in sync in real-time

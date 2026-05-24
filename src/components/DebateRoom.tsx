@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { DebateRoom, Participant, SpeechSegment, ChatMessage, ScoreBreakdown, DebateSummaryReport } from '../types';
 import VintageCard from './VintageCard';
+import { useLiveKit } from '../lib/useLiveKit';
+import { joinOrUpdateSupabaseParticipant, leaveSupabaseRoom, addSupabaseChatMessage, addSupabaseSpeechSegment } from '../lib/supabaseSync';
 import { 
   Mic, MicOff, Video, VideoOff, MessageSquare, Send, Award, Play, Pause, 
   RotateCcw, Sparkles, BookOpen, ThumbsUp, ThumbsDown, HelpCircle, ChevronLeft, Flag, FileText, ClipboardList,
@@ -278,6 +280,25 @@ export default function DebateRoomChamber({ room, currentUser, onBack, onUpdateR
       localLoopbackGainRef.current.gain.setValueAtTime(selfMonitor ? 0.35 : 0.0, now);
     }
   }, [selfMonitor]);
+
+  // 🎙️ LiveKit Multi-User Real-time audio stream connection hook
+  const { 
+    isConnected: isLkConnected, 
+    isDemo: isLkDemo, 
+    error: lkError, 
+    activeSpeakers, 
+    setMicMuted 
+  } = useLiveKit(
+    room.id, 
+    uId, 
+    userSpeakerName, 
+    !isMicActive
+  );
+
+  // Synchronize microphone activation state with the remote LiveKit publishing tracks
+  useEffect(() => {
+    setMicMuted(!isMicActive);
+  }, [isMicActive]);
 
   // Webcam helper
   const toggleCamera = async () => {
@@ -851,6 +872,58 @@ export default function DebateRoomChamber({ room, currentUser, onBack, onUpdateR
         <p className="font-serif italic text-xs text-amber-900/60 mt-2 max-w-2xl mx-auto">
           Context: {room.description}
         </p>
+
+        {/* Live Voice Status Indicator Gavel Track */}
+        <div className="mt-4 pt-4 border-t border-amber-900/20 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-amber-950 font-sans">
+          <div className="flex items-center gap-2">
+            <Radio className={`w-4 h-4 text-rose-800 ${isLkConnected && !isMicActive ? 'animate-pulse text-emerald-800' : 'text-stone-500'}`} />
+            <span className="font-bold uppercase tracking-wider text-[10px] font-display">
+              Chamber Audio Bridge Status:
+            </span>
+            {isLkDemo ? (
+              <span className="text-amber-800 font-semibold bg-amber-50 px-2 py-0.5 rounded border border-amber-300">
+                🟢 Simulated Audio Bridge Mode
+              </span>
+            ) : isLkConnected ? (
+              <span className="text-emerald-800 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-300">
+                🟢 LiveKit Voice Connected
+              </span>
+            ) : (
+              <span className="text-[#c0392b] font-bold bg-rose-50 px-2 py-0.5 rounded border border-rose-300">
+                🔴 Bridging Cloud Voice streams...
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-1.5 bg-[#ebdcb2] px-2.5 py-1 rounded border border-amber-950/20">
+              {isMicActive ? (
+                <div className="flex items-center gap-1 text-emerald-800 font-bold text-[10px] uppercase">
+                  <Mic className="w-3.5 h-3.5" />
+                  <span>Your Microphone Broadcasting</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1 text-rose-800 font-bold text-[10px] uppercase">
+                  <MicOff className="w-3.5 h-3.5" />
+                  <span>Your Microphone Muted</span>
+                </div>
+              )}
+            </div>
+
+            {/* Glowing active talker list */}
+            {activeSpeakers.length > 0 && (
+              <div className="flex items-center gap-1.5 animate-pulse bg-emerald-50 text-emerald-800 text-[10px] px-2.5 py-1 rounded border border-emerald-200">
+                <Headphones className="w-3.5 h-3.5 animate-bounce" />
+                <span className="font-bold font-mono">
+                  Speaking: {activeSpeakers.map(sid => {
+                    const found = room.participants.find(p => p.id === sid);
+                    return found ? found.name : "Orator";
+                  }).join(", ")}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Main Split Layout: 10-Seat Meeting Area, and Live Sidebar Panel */}
@@ -963,7 +1036,7 @@ export default function DebateRoomChamber({ room, currentUser, onBack, onUpdateR
 
               {/* ZOOM FEEDS FOR REGISTERED DEBATING ORATORS */}
               {otherActiveParticipants.map((member) => {
-                const isActiveSpeaker = currentSpeakerId === member.id;
+                const isActiveSpeaker = currentSpeakerId === member.id || activeSpeakers.includes(member.id);
                 const mPoll = room.speakerPolls[member.id] || { agree: 10, disagree: 6 };
                 return (
                   <div 
