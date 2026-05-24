@@ -21,8 +21,8 @@ app.get("/api/config", (req, res) => {
   });
 });
 
-// API Route: LiveKit access token dispenser
-app.post("/api/livekit/token", async (req, res) => {
+// API Route: LiveKit access token dispenser (both /api/livekit-token and /api/livekit/token patterns matched)
+const livekitTokenHandler = async (req: express.Request, res: express.Response) => {
   const { room, identity, name } = req.body;
   if (!room || !identity) {
     return res.status(400).json({ error: "Room and identity are required." });
@@ -63,7 +63,10 @@ app.post("/api/livekit/token", async (req, res) => {
   } catch (err: any) {
     res.status(500).json({ error: err.message || "Failed to generate LiveKit token" });
   }
-});
+};
+
+app.post("/api/livekit-token", livekitTokenHandler);
+app.post("/api/livekit/token", livekitTokenHandler);
 
 const PORT = 3000;
 

@@ -20,7 +20,7 @@ export function useLiveKit(roomId: string, participantId: string, participantNam
 
       try {
         // Fetch LiveKit access token from Express backend
-        const res = await fetch("/api/livekit/token", {
+        const res = await fetch("/api/livekit-token", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ room: roomId, identity: participantId, name: participantName })
