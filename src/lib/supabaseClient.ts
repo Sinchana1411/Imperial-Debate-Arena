@@ -2,17 +2,17 @@ import { createClient } from '@supabase/supabase-js';
 
 // Load initial configuration from environment variables
 // Note: Vite exposes VITE_ prefix.
-const envUrl = (import.meta.env?.VITE_SUPABASE_URL as string) || "";
-const envKey = (import.meta.env?.VITE_SUPABASE_ANON_KEY as string) || "";
+let envUrl = ((import.meta as any).env?.VITE_SUPABASE_URL as string) || "";
+let envKey = ((import.meta as any).env?.VITE_SUPABASE_ANON_KEY as string) || "";
 
 // Check for user-defined configuration overrides in localStorage for instant testing
 const storedUrl = typeof window !== 'undefined' ? localStorage.getItem('supabase_url_override') || "" : "";
 const storedKey = typeof window !== 'undefined' ? localStorage.getItem('supabase_key_override') || "" : "";
 
-const activeUrl = storedUrl || envUrl;
-const activeKey = storedKey || envKey;
+let activeUrl = storedUrl || envUrl;
+let activeKey = storedKey || envKey;
 
-export const supabase = activeUrl && activeKey 
+export let supabase = activeUrl && activeKey 
   ? createClient(activeUrl, activeKey, {
       auth: {
         persistSession: false // client-side session logic is kept light
@@ -30,6 +30,30 @@ export function getSupabaseConfig() {
   };
 }
 
+// Dynamically configuration helper called from App initialization
+export function configureSupabase(url: string, key: string, forceEnvSource: boolean = false) {
+  if (url && key) {
+    activeUrl = url;
+    activeKey = key;
+    if (forceEnvSource) {
+      envUrl = url;
+      envKey = key;
+    }
+    supabase = createClient(url, key, {
+      auth: {
+        persistSession: false
+      }
+    });
+  } else {
+    // If we're clearing, default back
+    activeUrl = storedUrl || envUrl;
+    activeKey = storedKey || envKey;
+    supabase = activeUrl && activeKey
+      ? createClient(activeUrl, activeKey, { auth: { persistSession: false } })
+      : null;
+  }
+}
+
 export function saveSupabaseOverride(url: string, key: string) {
   if (url && key) {
     localStorage.setItem('supabase_url_override', url.trim());
@@ -42,7 +66,7 @@ export function saveSupabaseOverride(url: string, key: string) {
 }
 
 // LiveKit URL handling
-const envLkUrl = (import.meta.env?.VITE_LIVEKIT_URL as string) || "";
+const envLkUrl = ((import.meta as any).env?.VITE_LIVEKIT_URL as string) || "";
 const storedLkUrl = typeof window !== 'undefined' ? localStorage.getItem('livekit_url_override') || "" : "";
 export const getLiveKitConfig = () => {
   const activeLkUrl = storedLkUrl || envLkUrl;

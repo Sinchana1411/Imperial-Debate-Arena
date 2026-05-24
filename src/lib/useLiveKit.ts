@@ -45,9 +45,7 @@ export function useLiveKit(roomId: string, participantId: string, participantNam
         const serverUrl = lkConfig.url || data.livekitUrl;
 
         // Instantiate livekit Room
-        room = new Room({
-          connectOptions: { autoSubscribe: true }
-        });
+        room = new Room();
         roomRef.current = room;
 
         // Register room listeners
@@ -87,7 +85,7 @@ export function useLiveKit(roomId: string, participantId: string, participantNam
         });
 
         // Establish connection
-        await room.connect(serverUrl, data.token);
+        await room.connect(serverUrl, data.token, { autoSubscribe: true });
 
         // Publish local mic audio if seating assignment is active
         try {

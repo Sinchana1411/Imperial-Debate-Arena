@@ -4,7 +4,7 @@ import { DebateRoom } from './types';
 import RoomDashboard from './components/RoomDashboard';
 import DebateRoomChamber from './components/DebateRoom';
 import { Clock, Ship, CalendarClock, LogOut, Database, Settings, ShieldCheck, Copy, Check, Info } from 'lucide-react';
-import { supabase, getSupabaseConfig, saveSupabaseOverride, getLiveKitConfig, saveLiveKitOverride } from './lib/supabaseClient';
+import { supabase, getSupabaseConfig, saveSupabaseOverride, getLiveKitConfig, saveLiveKitOverride, configureSupabase } from './lib/supabaseClient';
 import { fetchFullSupabaseRoom, listSupabaseRooms, saveSupabaseRoomMeta, deleteSupabaseRoom, SQL_SCHEMA_MIGRATION } from './lib/supabaseSync';
 
 export default function App() {
@@ -27,6 +27,7 @@ export default function App() {
 
   // Supabase & LiveKit Dynamic Configuration settings states
   const [showSettings, setShowSettings] = useState(false);
+  const [supabaseConfigState, setSupabaseConfigState] = useState(getSupabaseConfig());
   const [supabaseOverrideUrl, setSupabaseOverrideUrl] = useState(getSupabaseConfig().url);
   const [supabaseOverrideKey, setSupabaseOverrideKey] = useState('');
   const [liveKitOverrideUrl, setLiveKitOverrideUrl] = useState(getLiveKitConfig().url);
@@ -120,51 +121,86 @@ export default function App() {
     };
   }, []);
 
-  // 4. Live Cloud Supabase Database Real-time Channel synchronization
+  // 4. Dynamic Cloud Supabase Server Initialization & Postgres Real-time Sync
   useEffect(() => {
-    if (!supabase) return;
-
-    console.log("Supabase Integration verified. Seeding assembly registers...");
     let active = true;
+    let channel: any = null;
 
-    async function initialDbSync() {
+    async function bootstrapDatabase() {
+      try {
+        // Query server config proxy to automatically check for secrets
+        const res = await fetch("/api/config");
+        if (res.ok) {
+          const configData = await res.json();
+          const localConf = getSupabaseConfig();
+          
+          if (configData.supabaseUrl && configData.supabaseAnonKey && localConf.source !== 'user-override') {
+            console.log("Supabase setup: Environment variables detected on host node. Dynamic bridge activating...");
+            configureSupabase(configData.supabaseUrl, configData.supabaseAnonKey, true);
+            
+            if (active) {
+              const freshConf = getSupabaseConfig();
+              setSupabaseConfigState(freshConf);
+              setSupabaseOverrideUrl(freshConf.url);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("Could not query dynamic config channel on start. Defaulting to client variables/overrides.", err);
+      }
+
+      // Check current active client instance
+      const { supabase: activeClient } = await import('./lib/supabaseClient');
+      if (!activeClient) {
+        console.info("Supabase Sync: No active Supabase configuration loaded. Running in local memory fallback.");
+        return;
+      }
+
+      console.log("Supabase Integration verified. Seeding assembly registers...");
       try {
         const loaded = await listSupabaseRooms();
         if (active && loaded.length > 0) {
           setRooms(loaded);
         }
-      } catch (err) {
-        console.warn("Error bootstrapping Supabase room meta records", err);
+      } catch (dbErr) {
+        console.warn("Initial DB load failed. Check if SQL tables are fully run in your database.", dbErr);
+      }
+
+      // Hook up Postgres changes channels
+      try {
+        channel = activeClient
+          .channel('public:debate_all_tables')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'debate_rooms' }, async () => {
+            const loaded = await listSupabaseRooms();
+            if (active) setRooms(loaded);
+          })
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'debate_participants' }, async () => {
+            const loaded = await listSupabaseRooms();
+            if (active) setRooms(loaded);
+          })
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'debate_messages' }, async () => {
+            const loaded = await listSupabaseRooms();
+            if (active) setRooms(loaded);
+          })
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'debate_speeches' }, async () => {
+            const loaded = await listSupabaseRooms();
+            if (active) setRooms(loaded);
+          })
+          .subscribe();
+      } catch (rtErr) {
+        console.warn("Failing Real-time sync bridge:", rtErr);
       }
     }
-    initialDbSync();
 
-    // Listen to real-time broadcasts on public schema changes to keep multi-user synchronized
-    const channel = supabase
-      .channel('public:debate_all_tables')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'debate_rooms' }, async () => {
-        const loaded = await listSupabaseRooms();
-        if (active) setRooms(loaded);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'debate_participants' }, async () => {
-        const loaded = await listSupabaseRooms();
-        if (active) setRooms(loaded);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'debate_messages' }, async () => {
-        const loaded = await listSupabaseRooms();
-        if (active) setRooms(loaded);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'debate_speeches' }, async () => {
-        const loaded = await listSupabaseRooms();
-        if (active) setRooms(loaded);
-      })
-      .subscribe();
+    bootstrapDatabase();
 
     return () => {
       active = false;
-      try {
-        supabase.removeChannel(channel);
-      } catch (e) {}
+      if (channel) {
+        try {
+          if (supabase) supabase.removeChannel(channel);
+        } catch (e) {}
+      }
     };
   }, []);
 
@@ -322,12 +358,12 @@ export default function App() {
               <div className="flex items-center gap-1.5">
                 <Database className="w-3.5 h-3.5" />
                 <span>Supabase Ledger:</span>
-                {getSupabaseConfig().isConfigured ? (
+                {supabaseConfigState.isConfigured ? (
                   <span className="text-emerald-800 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-300">
-                    🟢 Cloud Sync Active ({getSupabaseConfig().source})
+                    🟢 Cloud Sync Active ({supabaseConfigState.source})
                   </span>
                 ) : (
-                  <span className="text-amber-800 font-medium bg-amber-50 px-1.5 py-0.5 rounded border border-amber-300">
+                  <span className="text-amber-800 font-medium bg-amber-50 px-1.5 py-0.5 rounded border border-[#e2d5af]">
                     🟡 Assembly Room Memory fallback
                   </span>
                 )}
