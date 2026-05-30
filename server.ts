@@ -12,12 +12,25 @@ dotenv.config();
 const app = express();
 app.use(express.json());
 
+function formatLiveKitUrl(url?: string): string {
+  if (!url) return "";
+  let formatted = url.trim();
+  if (formatted.startsWith("http://")) {
+    formatted = "ws://" + formatted.substring(7);
+  } else if (formatted.startsWith("https://")) {
+    formatted = "wss://" + formatted.substring(8);
+  } else if (!formatted.startsWith("ws://") && !formatted.startsWith("wss://")) {
+    formatted = "wss://" + formatted;
+  }
+  return formatted;
+}
+
 // API Route: Safe public configuration secrets proxy (URL & Anon Key only)
 app.get("/api/config", (req, res) => {
   res.json({
     supabaseUrl: process.env.SUPABASE_URL || "",
     supabaseAnonKey: process.env.SUPABASE_ANON_KEY || "",
-    livekitUrl: process.env.LIVEKIT_URL || ""
+    livekitUrl: formatLiveKitUrl(process.env.LIVEKIT_URL)
   });
 });
 
@@ -30,7 +43,7 @@ const livekitTokenHandler = async (req: express.Request, res: express.Response) 
 
   const apiKey = process.env.LIVEKIT_API_KEY;
   const apiSecret = process.env.LIVEKIT_API_SECRET;
-  const livekitUrl = process.env.LIVEKIT_URL;
+  const livekitUrl = formatLiveKitUrl(process.env.LIVEKIT_URL);
 
   if (!apiKey || !apiSecret || !livekitUrl) {
     return res.json({

@@ -311,7 +311,7 @@ export async function saveSupabaseRoomMeta(room: DebateRoom): Promise<boolean> {
         .from('debate_participants')
         .delete()
         .eq('room_id', room.id)
-        .not('id', 'in', `(${activeIds.join(',')})`);
+        .not('id', 'in', activeIds);
       if (clErr) console.warn("Supabase Sync: stale record clearance error:", clErr);
     }
 

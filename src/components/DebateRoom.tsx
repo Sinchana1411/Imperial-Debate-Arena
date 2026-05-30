@@ -6,7 +6,7 @@ import { joinOrUpdateSupabaseParticipant, leaveSupabaseRoom, addSupabaseChatMess
 import { 
   Mic, MicOff, Video, VideoOff, MessageSquare, Send, Award, Play, Pause, 
   RotateCcw, Sparkles, BookOpen, ThumbsUp, ThumbsDown, HelpCircle, ChevronLeft, Flag, FileText, ClipboardList,
-  Eye, EyeOff, Radio, Headphones
+  Eye, EyeOff, Radio, Headphones, VolumeX, Volume2
 } from 'lucide-react';
 
 interface DebateRoomProps {
@@ -19,6 +19,42 @@ interface DebateRoomProps {
   } | null;
   onBack: () => void;
   onUpdateRoom: (updated: DebateRoom) => void;
+}
+
+interface LiveVideoFeedProps {
+  track: any;
+  isLocal?: boolean;
+}
+
+function LiveVideoFeed({ track, isLocal = false }: LiveVideoFeedProps) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    const videoEl = videoRef.current;
+    if (!videoEl || !track) return;
+
+    try {
+      track.attach(videoEl);
+    } catch (e) {
+      console.warn("Failed to attach track to video element:", e);
+    }
+
+    return () => {
+      try {
+        track.detach(videoEl);
+      } catch (e) {}
+    };
+  }, [track]);
+
+  return (
+    <video
+      ref={videoRef}
+      autoPlay
+      playsInline
+      muted={isLocal}
+      className={`w-full h-full object-cover ${isLocal ? 'scale-x-[-1]' : ''}`}
+    />
+  );
 }
 
 export default function DebateRoomChamber({ room, currentUser, onBack, onUpdateRoom }: DebateRoomProps) {
@@ -287,18 +323,16 @@ export default function DebateRoomChamber({ room, currentUser, onBack, onUpdateR
     isDemo: isLkDemo, 
     error: lkError, 
     activeSpeakers, 
-    setMicMuted 
+    videoTracks,
+    canPlayAudio,
+    startAudio
   } = useLiveKit(
     room.id, 
     uId, 
     userSpeakerName, 
-    !isMicActive
+    isMicActive,
+    isCameraActive
   );
-
-  // Synchronize microphone activation state with the remote LiveKit publishing tracks
-  useEffect(() => {
-    setMicMuted(!isMicActive);
-  }, [isMicActive]);
 
   // Webcam helper
   const toggleCamera = async () => {
@@ -314,20 +348,21 @@ export default function DebateRoomChamber({ room, currentUser, onBack, onUpdateR
         }
       }
     } else {
-      try {
-        const constraints = {
-          video: { width: 400, height: 400, aspectRatio: 1 },
-          audio: isMicActive
-        };
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        setIsCameraActive(true);
-        if (localStream) {
-          localStream.getTracks().forEach(t => t.stop());
+      setIsCameraActive(true);
+      if (isLkDemo) {
+        try {
+          const constraints = {
+            video: { width: 400, height: 400, aspectRatio: 1 },
+            audio: isMicActive
+          };
+          const stream = await navigator.mediaDevices.getUserMedia(constraints);
+          if (localStream) {
+            localStream.getTracks().forEach(t => t.stop());
+          }
+          setLocalStream(stream);
+        } catch (err) {
+          console.error("Camera access failure:", err);
         }
-        setLocalStream(stream);
-      } catch (err) {
-        console.error("Camera access failure:", err);
-        alert("Unable to access camera. Please confirm device access/permissions.");
       }
     }
   };
@@ -347,21 +382,22 @@ export default function DebateRoomChamber({ room, currentUser, onBack, onUpdateR
         }
       }
     } else {
-      try {
-        const constraints = {
-          video: isCameraActive,
-          audio: { echoCancellation: true, noiseSuppression: true }
-        };
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        setIsMicActive(true);
-        if (localStream) {
-          localStream.getTracks().forEach(t => t.stop());
+      setIsMicActive(true);
+      if (isLkDemo) {
+        try {
+          const constraints = {
+            video: isCameraActive,
+            audio: { echoCancellation: true, noiseSuppression: true }
+          };
+          const stream = await navigator.mediaDevices.getUserMedia(constraints);
+          if (localStream) {
+            localStream.getTracks().forEach(t => t.stop());
+          }
+          setLocalStream(stream);
+          setupVoiceClarityAudio(stream);
+        } catch (err) {
+          console.error("Microphone access failure:", err);
         }
-        setLocalStream(stream);
-        setupVoiceClarityAudio(stream);
-      } catch (err) {
-        console.error("Microphone access failure:", err);
-        alert("Unable to access microphone. Please confirm device access/permissions.");
       }
     }
   };
@@ -924,6 +960,26 @@ export default function DebateRoomChamber({ room, currentUser, onBack, onUpdateR
             )}
           </div>
         </div>
+
+        {!canPlayAudio && !isLkDemo && (
+          <div className="mt-4 p-3 bg-amber-50 border border-amber-300 rounded-sm flex flex-col sm:flex-row items-center justify-between gap-3 shadow-md animate-pulse">
+            <div className="flex items-center gap-2.5">
+              <VolumeX className="w-5 h-5 text-rose-800 flex-shrink-0" />
+              <div className="text-left">
+                <p className="font-bold text-amber-950 text-xs uppercase tracking-wider font-display">Browser Audio Playback Blocked</p>
+                <p className="text-[11px] text-amber-900 leading-normal font-sans">
+                  Your browser's privacy policy is blocking other delegates' real-time voice streams. Click the button to grant speech play authorization.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={startAudio}
+              className="px-3.5 py-1.5 bg-amber-900 hover:bg-amber-950 text-[#f4edd8] rounded font-display font-semibold text-[10px] uppercase tracking-wider shadow-sm flex items-center gap-1.5 cursor-pointer flex-shrink-0"
+            >
+              <Volume2 className="w-3.5 h-3.5" /> Authorize Audio
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Main Split Layout: 10-Seat Meeting Area, and Live Sidebar Panel */}
@@ -975,7 +1031,9 @@ export default function DebateRoomChamber({ room, currentUser, onBack, onUpdateR
 
                 {/* Video Container Frame */}
                 <div className="absolute inset-0 w-full h-full flex items-center justify-center bg-[#15100c]">
-                  {isCameraActive && localStream ? (
+                  {isCameraActive && (!isLkDemo && videoTracks[uId]) ? (
+                    <LiveVideoFeed track={videoTracks[uId]} isLocal={true} />
+                  ) : isCameraActive && localStream ? (
                     <video 
                       ref={localVideoRef}
                       autoPlay 
@@ -1064,30 +1122,33 @@ export default function DebateRoomChamber({ room, currentUser, onBack, onUpdateR
                     {/* Outer Camera Feed Simulation */}
                     <div className="absolute inset-0 w-full h-full flex items-center justify-center bg-[#15100c]">
                       {!member.isVideoOff ? (
-                        <div className="relative w-full h-full flex flex-col items-center justify-center text-center p-4">
-                          
-                          {/* Animated speaker visual waves back plate */}
-                          <div className={`absolute inset-0 bg-[#ebdcb2] transition-opacity opacity-[0.03] ${isActiveSpeaker && 'animate-pulse opacity-[0.11]'}`} />
-                          
-                          {/* Main Avatar icon */}
-                          <div className={`w-14 h-14 rounded-full bg-[#ebdcb2] border border-[#3d2f24] flex items-center justify-center text-3xl shadow-vintage relative flex-shrink-0 transition-transform ${
-                            isActiveSpeaker ? 'scale-110 border-amber-500 ring-2 ring-amber-500/30 animate-pulse' : 'filter sepia brightness-90'
-                          }`}>
-                            <span>{member.avatar}</span>
-                          </div>
-
-                          {/* Interactive frequency waves indicator overlay strictly for active delegate */}
-                          {isActiveSpeaker ? (
-                            <div className="absolute bottom-12 inset-x-0 flex items-center justify-center gap-0.5 h-5 z-20">
-                              <span className="w-1 bg-amber-500 h-3 animate-[bounce_0.6s_infinite_100ms] rounded-full" />
-                              <span className="w-1 bg-amber-400 h-5 animate-[bounce_0.6s_infinite_200ms] rounded-full" />
-                              <span className="w-1 bg-amber-600 h-2 animate-[bounce_0.6s_infinite_300ms] rounded-full" />
-                              <span className="w-1 bg-amber-500 h-4 animate-[bounce_0.6s_infinite_400ms] rounded-full" />
+                        videoTracks[member.id] ? (
+                          <LiveVideoFeed track={videoTracks[member.id]} />
+                        ) : (
+                          <div className="relative w-full h-full flex flex-col items-center justify-center text-center p-4">
+                            {/* Animated speaker visual waves back plate */}
+                            <div className={`absolute inset-0 bg-[#ebdcb2] transition-opacity opacity-[0.03] ${isActiveSpeaker && 'animate-pulse opacity-[0.11]'}`} />
+                            
+                            {/* Main Avatar icon */}
+                            <div className={`w-14 h-14 rounded-full bg-[#ebdcb2] border border-[#3d2f24] flex items-center justify-center text-3xl shadow-vintage relative flex-shrink-0 transition-transform ${
+                              isActiveSpeaker ? 'scale-110 border-amber-500 ring-2 ring-amber-500/30 animate-pulse' : 'filter sepia brightness-90'
+                            }`}>
+                              <span>{member.avatar}</span>
                             </div>
-                          ) : (
-                            <span className="text-[8px] text-amber-900/40 font-mono absolute bottom-8 tracking-widest uppercase">FEED ONLINE</span>
-                          )}
-                        </div>
+
+                            {/* Interactive frequency waves indicator overlay strictly for active delegate */}
+                            {isActiveSpeaker ? (
+                              <div className="absolute bottom-12 inset-x-0 flex items-center justify-center gap-0.5 h-5 z-20">
+                                <span className="w-1 bg-amber-500 h-3 animate-[bounce_0.6s_infinite_100ms] rounded-full" />
+                                <span className="w-1 bg-amber-400 h-5 animate-[bounce_0.6s_infinite_200ms] rounded-full" />
+                                <span className="w-1 bg-amber-600 h-2 animate-[bounce_0.6s_infinite_300ms] rounded-full" />
+                                <span className="w-1 bg-amber-500 h-4 animate-[bounce_0.6s_infinite_400ms] rounded-full" />
+                              </div>
+                            ) : (
+                              <span className="text-[8px] text-amber-900/40 font-mono absolute bottom-8 tracking-widest uppercase">FEED ONLINE</span>
+                            )}
+                          </div>
+                        )
                       ) : (
                         <div className="flex flex-col items-center justify-center text-center p-3">
                           <span className="text-3xl opacity-20 filter grayscale">🗣️</span>
